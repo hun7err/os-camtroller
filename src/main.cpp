@@ -2,6 +2,8 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <iostream>
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 #ifndef WIN32
 	#include <Windows.h>
@@ -9,8 +11,85 @@
 using namespace cv;
 using namespace std;
 
+const double EulerConstant = std::exp(1.0);
+const double DPISQRD = std::pow((2*M_PI), 2.0);
+
 #define KEY_ESCAPE 27
 #define KEY_SPACE  32
+
+/*
+void calcMatArrayMean(cv::Mat* arr, unsigned int size, cv::Mat* mean)
+{
+	unsigned int height = arr[0].size().height, width = arr[0].size().width;
+	*mean = Mat::zeros(arr[0].size(), CV_8UC3);
+	
+	unsigned unsigned char **data,
+					*mean_data = (unsigned char*)mean->data;
+	
+	data = new unsigned char* [size];
+	unsigned int i = 0;
+	for(; i < size; i++)
+	{
+		data[i] = (unsigned char*)arr[i].data;
+	}
+	i = 0;
+
+	int cn = mean->channels();
+
+	for(; i < mean->rows; i++)
+	{
+		for(int j = 0; j < mean->cols; j++)
+		{
+			unsigned int hue = 0, saturation = 0, value = 0;
+			for(int cur_elem = 0; cur_elem < size; cur_elem++)
+			{
+				// dla wiêkszej iloœci próbek tutaj jest segfault
+
+				hue += data[cur_elem][arr[cur_elem].step[0]*i + arr[cur_elem].step[1]*j + 0];
+				saturation += data[cur_elem][arr[cur_elem].step[0]*i + arr[cur_elem].step[1]*j + 1];
+				value += data[cur_elem][arr[cur_elem].step[0]*i + arr[cur_elem].step[1]*j + 2];
+			}
+			hue /= size;
+			saturation /= size;
+			value /= size;
+			//cout << "mean_data filling" << endl;
+			mean_data[mean->step[0]*i + mean->step[1]*j + 0] = hue;
+			mean_data[mean->step[0]*i + mean->step[1]*j + 1] = saturation;
+			mean_data[mean->step[0]*i + mean->step[1]*j + 2] = value;
+		}
+	}
+	//cout << "end" << endl;
+
+	delete [] data;
+}*/
+
+void calcProbabilityMask(Mat image, Mat mean, Mat covar, Mat& mask)
+{
+	mask = Mat::zeros(image.size(), CV_8UC3);
+	
+	unsigned unsigned char *data, *mask_data;
+	
+	data = image.data;
+	unsigned int i = 0;
+
+	int cn = image.channels();
+
+	for(; i < image.rows; i++)
+	{
+		for(int j = 0; j < image.cols; j++)
+		{
+			Scalar pixel(
+							data[image.step[0]*i + image.step[1]*j + 0],
+							data[image.step[0]*i + image.step[1]*j + 1]
+						);
+			
+			double P = 1 / sqrt(DPISQRD * determinant(covar)) * exp( -0.5 * (pixel - mean) * covar.inv() * (pixel-mean).t());
+		}
+	}
+	//cout << "end" << endl;
+
+	delete [] data;
+}
 
 int main()
 {
@@ -79,6 +158,11 @@ int main()
 	
     namedWindow("Effects", CV_WINDOW_AUTOSIZE);
 
+	Mat s;
+	//calcMatArrayMean(samples, sample_count, &s);
+	Mat covar, mean;
+	calcCovarMatrix(samples, sample_count, covar, mean, CV_COVAR_NORMAL);
+
     do {
         capture >> frame;
         flip(frame, frame, 1);
@@ -90,7 +174,7 @@ int main()
         cvtColor(effects, effects, CV_HSV2BGR);
 
         imshow("CAM", frame);
-        imshow("Effects", samples[0]); // effects 
+        imshow("Effects", s); // effects 
 
         key = waitKey(1);
     } while (key != KEY_ESCAPE);
