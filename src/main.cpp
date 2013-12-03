@@ -19,22 +19,31 @@ const double DPISQRD = std::pow((2*M_PI), 2.0);
 #define KEY_ESCAPE 27
 #define KEY_SPACE  32
 
-int min_hue = 0, max_hue = 255, min_sat = 0, max_sat = 255;
+//int min_hue = 0, max_hue = 255, min_sat = 0, max_sat = 255;
+int min_h = 6, max_h = 38, min_s = 38, max_s = 250, min_v = 51, max_v = 242;
 
-void minhue(int, void*)
-{
-	printf("min hue = %d\n", min_hue);
-}
 
-void maxhue(int, void*)
+void minh(int, void*)
 {
 }
 
-void minsat(int, void*)
+void maxh(int, void*)
 {
 }
 
-void maxsat(int, void*)
+void mins(int, void*)
+{
+}
+
+void maxs(int, void*)
+{
+}
+
+void minv(int, void*)
+{
+}
+
+void maxv(int, void*)
 {
 }
 
@@ -51,7 +60,8 @@ void getMask(Mat* frame, Mat* mask)
 			//printf("i = %d, j = %d\n", i, j);
 			pixel = frame->at<Vec3b>(i, j);
 
-			if(pixel[0] >= min_hue && pixel[0] <= max_hue && pixel[1] >= min_sat && pixel[1] <= max_sat)
+			//if(pixel[0] >= min_hue && pixel[0] <= max_hue && pixel[1] >= min_sat && pixel[1] <= max_sat)
+			if(pixel[0] > min_h && pixel[0] < max_h && pixel[1] > min_s && pixel[1] < max_s && pixel[2] > min_v && pixel[2] < max_v)
 			{
 				mask->at<unsigned char>(i,j) = 255;
 			}
@@ -59,37 +69,6 @@ void getMask(Mat* frame, Mat* mask)
 			{
 				mask->at<unsigned char>(i,j) = 0;
 			}
-		}
-	}
-}
-
-void calcProbabMask(Mat* frame, Mat mean, Mat* covar, float covarDet, Mat* out)
-{
-	float* data = (float*)frame->data;
-	//float* out_data = (float*)out->data;
-	int channels = frame->channels();
-	static Mat val(Size(1,1), CV_32FC1);
-	unsigned int i = 0, j = 0;
-	static float P;
-	static unsigned int f_cols = frame->cols, f_rows = frame->rows;
-	float factor = 1 / sqrt(DPISQRD * covarDet);
-	double hue = 0, saturation = 0;
-
-	// strasznie du¿o czasu spêdza na iteracji po pikselach
-	for(; i < f_rows; i++)
-	{
-		for(j = 0; j < f_cols; j++)
-		{
-			Scalar pixel(	data[channels * (f_cols*i + j)],
-							data[channels * (f_cols*i + j) + 1]		);
-			
-			// to-do: tworzyæ pixel wczeœniej, a tu tylko uzupe³niaæ
-
-			val = (pixel - mean) * *covar * (pixel - mean).t();
-			P = factor * exp(-0.5f * val.data[0]);
-			//P = 1;
-			out->at<float>(i, j) = P;
-			//out->data[channels * (frame->cols*i + j)] = 255; // czy to na pewno bêdzie floatem? // temporary: *255
 		}
 	}
 }
@@ -110,6 +89,11 @@ int main()
         cout << "Could not open the camera device, quitting." << endl;
         return -1;
     }
+	capture.set(CV_CAP_PROP_AUTO_EXPOSURE, 0);
+	capture.set(CV_CAP_PROP_SETTINGS, 1);
+	capture.set(CV_CAP_PROP_BACKLIGHT, 0);
+
+	printf("OCV version: %d.%d\n", CV_MAJOR_VERSION, CV_MINOR_VERSION);
 
     cv::namedWindow("CAM", CV_WINDOW_AUTOSIZE);
 
@@ -139,39 +123,74 @@ int main()
     cv::namedWindow("Effects", CV_WINDOW_AUTOSIZE);
 	cv::namedWindow("Suwaki", CV_WINDOW_AUTOSIZE);
 
+	/*
 	createTrackbar("Min Hue", "Suwaki", &min_hue, 255, minhue);
 	createTrackbar("Max Hue", "Suwaki", &max_hue, 255, maxhue);
 	createTrackbar("Min Sat", "Suwaki", &min_sat, 255, minsat);
 	createTrackbar("Max Sat", "Suwaki", &max_sat, 255, maxsat);
+	*/
+	createTrackbar("Min Hue", "Suwaki", &min_h, 255, minh);
+	createTrackbar("Max Hue", "Suwaki", &max_h, 255, maxh);
+	createTrackbar("Min Saturation", "Suwaki", &min_s, 255, mins);
+	createTrackbar("Max Saturation", "Suwaki", &max_s, 255, maxs);
+	createTrackbar("Min Value", "Suwaki", &min_v, 255, minv);
+	createTrackbar("Max Value", "Suwaki", &max_v, 255, maxv);
 
 	BackgroundSubtractorMOG2 sub;
 	sub.set("nmixtures", 3);
 	sub.set("detectShadows", false);
-	int frames = 500;
+	int frames = 0; // 500
 
-	unsigned char size = 2;
+	unsigned char size = 1;
 	Mat elem = getStructuringElement(	MORPH_ELLIPSE,
 										Size(2*size+1, 2*size+1),
 										Point(size, size)
 										);
+
+	vector<vector<Point> > kontury;
+	foreground = Mat::zeros(frame.size(), CV_8UC1);
 
     do {
         capture >> frame;
         flip(frame, frame, 1);
 		//cvtColor(frame, effects, CV_BGR2HSV);
 		
+			//sub(frame, foreground);
+			/*
 		if(frames > 0)
 		{
 			sub(frame, foreground);
-			frames--;
+			//frames--;
 		}
 		else
 		{
 			sub(frame, foreground, 0);
+		}*/
+		//sub.getBackgroundImage(effects);
+		cvtColor(frame, effects, CV_BGR2HSV);
+		getMask(&effects, &mask);
+		GaussianBlur(mask, mask, Size(5,5), 5, 5);
+		erode(mask, mask, elem);
+		dilate(mask, mask, elem);
+		mask.copyTo(foreground);
+		
+
+		findContours(foreground, kontury, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE); // APPROX_SIMPLE
+		for(vector<vector<Point> >::iterator it = kontury.begin(); it != kontury.end(); ++it)
+		{
+			if(contourArea(*it) >= 5000)
+			{
+				vector<vector<Point> > tcontours;
+				tcontours.push_back(*it);
+				drawContours(frame,tcontours,-1,Scalar(0,0,255),2);
+
+				vector<vector<Point> > hulls(1);
+				vector<vector<int> > hullsI(1);
+				convexHull(Mat(tcontours[0]),hulls[0],false);
+				convexHull(Mat(tcontours[0]),hullsI[0],false);
+				drawContours(frame,hulls,-1,Scalar(0,255,0),2);
+			}
 		}
-		sub.getBackgroundImage(effects);
-		erode(foreground, foreground, Mat());
-		dilate(foreground, foreground, Mat());
 		//morphologyEx(foreground, foreground, MORPH_OPEN, elem);
 
 
@@ -179,10 +198,11 @@ int main()
 
 		//getMask(&effects, &mask);
 		//probab.convertTo(probab, CV_8UC3);
-		imshow("Effects", foreground); // effects
+		imshow("Effects", mask); // foreground
         imshow("CAM", frame); 
 
         key = waitKey(1);
+		kontury.clear();
     } while (key != KEY_ESCAPE);
 
     return 0;
