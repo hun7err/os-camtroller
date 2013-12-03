@@ -1,6 +1,8 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/video/video.hpp>
+#include <opencv2/ml/ml.hpp>
 #include <iostream>
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -17,78 +19,79 @@ const double DPISQRD = std::pow((2*M_PI), 2.0);
 #define KEY_ESCAPE 27
 #define KEY_SPACE  32
 
-/*
-void calcMatArrayMean(cv::Mat* arr, unsigned int size, cv::Mat* mean)
+int min_hue = 0, max_hue = 255, min_sat = 0, max_sat = 255;
+
+void minhue(int, void*)
 {
-	unsigned int height = arr[0].size().height, width = arr[0].size().width;
-	*mean = Mat::zeros(arr[0].size(), CV_8UC3);
-	
-	unsigned unsigned char **data,
-					*mean_data = (unsigned char*)mean->data;
-	
-	data = new unsigned char* [size];
-	unsigned int i = 0;
-	for(; i < size; i++)
-	{
-		data[i] = (unsigned char*)arr[i].data;
-	}
-	i = 0;
+	printf("min hue = %d\n", min_hue);
+}
 
-	int cn = mean->channels();
+void maxhue(int, void*)
+{
+}
 
-	for(; i < mean->rows; i++)
+void minsat(int, void*)
+{
+}
+
+void maxsat(int, void*)
+{
+}
+
+void getMask(Mat* frame, Mat* mask)
+{
+	static unsigned int i = 0, j = 0;
+	static const unsigned int rows = frame->rows, cols = frame->cols;
+	static Vec3b pixel;
+
+	for(i = 0; i < rows; i++)
 	{
-		for(int j = 0; j < mean->cols; j++)
+		for(j = 0; j < cols; j++)
 		{
-			unsigned int hue = 0, saturation = 0, value = 0;
-			for(int cur_elem = 0; cur_elem < size; cur_elem++)
+			//printf("i = %d, j = %d\n", i, j);
+			pixel = frame->at<Vec3b>(i, j);
+
+			if(pixel[0] >= min_hue && pixel[0] <= max_hue && pixel[1] >= min_sat && pixel[1] <= max_sat)
 			{
-				// dla wiêkszej iloœci próbek tutaj jest segfault
-
-				hue += data[cur_elem][arr[cur_elem].step[0]*i + arr[cur_elem].step[1]*j + 0];
-				saturation += data[cur_elem][arr[cur_elem].step[0]*i + arr[cur_elem].step[1]*j + 1];
-				value += data[cur_elem][arr[cur_elem].step[0]*i + arr[cur_elem].step[1]*j + 2];
+				mask->at<unsigned char>(i,j) = 255;
 			}
-			hue /= size;
-			saturation /= size;
-			value /= size;
-			//cout << "mean_data filling" << endl;
-			mean_data[mean->step[0]*i + mean->step[1]*j + 0] = hue;
-			mean_data[mean->step[0]*i + mean->step[1]*j + 1] = saturation;
-			mean_data[mean->step[0]*i + mean->step[1]*j + 2] = value;
+			else
+			{
+				mask->at<unsigned char>(i,j) = 0;
+			}
 		}
 	}
-	//cout << "end" << endl;
+}
 
-	delete [] data;
-}*/
-
-void calcProbabilityMask(Mat image, Mat mean, Mat covar, Mat& mask)
+void calcProbabMask(Mat* frame, Mat mean, Mat* covar, float covarDet, Mat* out)
 {
-	mask = Mat::zeros(image.size(), CV_8UC3);
-	
-	unsigned unsigned char *data, *mask_data;
-	
-	data = image.data;
-	unsigned int i = 0;
+	float* data = (float*)frame->data;
+	//float* out_data = (float*)out->data;
+	int channels = frame->channels();
+	static Mat val(Size(1,1), CV_32FC1);
+	unsigned int i = 0, j = 0;
+	static float P;
+	static unsigned int f_cols = frame->cols, f_rows = frame->rows;
+	float factor = 1 / sqrt(DPISQRD * covarDet);
+	double hue = 0, saturation = 0;
 
-	int cn = image.channels();
-
-	for(; i < image.rows; i++)
+	// strasznie du¿o czasu spêdza na iteracji po pikselach
+	for(; i < f_rows; i++)
 	{
-		for(int j = 0; j < image.cols; j++)
+		for(j = 0; j < f_cols; j++)
 		{
-			Scalar pixel(
-							data[image.step[0]*i + image.step[1]*j + 0],
-							data[image.step[0]*i + image.step[1]*j + 1]
-						);
+			Scalar pixel(	data[channels * (f_cols*i + j)],
+							data[channels * (f_cols*i + j) + 1]		);
 			
-			double P = 1 / sqrt(DPISQRD * determinant(covar)) * exp( -0.5 * (pixel - mean) * covar.inv() * (pixel-mean).t());
+			// to-do: tworzyæ pixel wczeœniej, a tu tylko uzupe³niaæ
+
+			val = (pixel - mean) * *covar * (pixel - mean).t();
+			P = factor * exp(-0.5f * val.data[0]);
+			//P = 1;
+			out->at<float>(i, j) = P;
+			//out->data[channels * (frame->cols*i + j)] = 255; // czy to na pewno bêdzie floatem? // temporary: *255
 		}
 	}
-	//cout << "end" << endl;
-
-	delete [] data;
 }
 
 int main()
@@ -108,9 +111,9 @@ int main()
         return -1;
     }
 
-    namedWindow("CAM", CV_WINDOW_AUTOSIZE);
+    cv::namedWindow("CAM", CV_WINDOW_AUTOSIZE);
 
-    Mat frame, effects;
+    Mat frame, effects, foreground;
 
     Mat channels[3], hsv;
 	int rect_width = 150, rect_height = 150, line_thickness = 2;
@@ -118,63 +121,66 @@ int main()
 			rect_y = (capture.get(CV_CAP_PROP_FRAME_HEIGHT) - rect_height)/2 - line_thickness;
 
 	capture >> frame;	// odczytujemy klatke
-	Mat mask = Mat::zeros(frame.size(), CV_8U);	// tworzymy czarny obraz wielkoœci odczytanej klatki
-	rectangle(mask, Point(rect_x,rect_y), Point(rect_x+rect_width+2*line_thickness, rect_y+rect_height+2*line_thickness), Scalar(255,255,255), -1); // ignorujemy obszar, który nie bêdzie rozmyty
-	bitwise_not(mask, mask);	// chcemy mieæ bia³e t³o ¿eby wyci¹æ tylko kwadrat
-
-	Mat blurred = Mat::zeros(frame.size(), CV_8UC3);	// tu bedzie rozmywana czêœæ obrazu
-	const int sample_count = 8;
-	Mat samples[sample_count];
-	int cur_sample_id = 0;
-	bool sample_gathering = false;
-
-	do {
-        capture >> frame;
-        flip(frame, frame, 1);
-		frame.copyTo(blurred, mask);
-		GaussianBlur(blurred, blurred, Size(25, 25), 10, 10);
-		blurred.copyTo(frame, mask);
-		
-		rectangle(frame, Point(rect_x,rect_y), Point(rect_x+rect_width+2*line_thickness, rect_y+rect_height+2*line_thickness), Scalar(0,0,255), line_thickness);
-        imshow("CAM", frame);
-
-        key = waitKey(1);
-		if(key == KEY_SPACE)
-		{
-			sample_gathering = true;
-		}
-		if(sample_gathering)
-		{
-			samples[cur_sample_id] = Mat::zeros(Size(rect_width, rect_height), CV_8UC3);
-			Mat(frame, Rect(rect_x+line_thickness, rect_y+line_thickness, rect_width, rect_height)).copyTo(samples[cur_sample_id]);
-			//cvtColor(samples[cur_sample_id], samples[cur_sample_id], CV_BGR2HSV);
-			cur_sample_id++;
-		}
-    } while (cur_sample_id < sample_count);
-	 
-	/*Mat sample = Mat::zeros(Size(rect_width, rect_height), CV_8UC3);
-	Mat(frame, Rect(rect_x+line_thickness, rect_y+line_thickness, rect_width, rect_height)).copyTo(sample);
-	cvtColor(sample, sample, CV_BGR2HSV);*/
+	Mat mask = Mat::zeros(frame.size(), CV_8UC1);	// tworzymy czarny obraz wielkoœci odczytanej klatki
 	
-    namedWindow("Effects", CV_WINDOW_AUTOSIZE);
+	vector<Mat> chnls;
 
-	Mat s;
-	//calcMatArrayMean(samples, sample_count, &s);
-	Mat covar, mean;
-	calcCovarMatrix(samples, sample_count, covar, mean, CV_COVAR_NORMAL);
+	SetCursorPos(500, 500);
+	// http://msdn.microsoft.com/en-us/library/ms646273%28v=vs.85%29.aspx
+	//MOUSEINPUT mi = {1, 1, XBUTTON1, MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_LEFTUP|MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE, 0, GetMessageExtraInfo()};
+	//INPUT input = {INPUT_MOUSE, mi};
+	//SendInput(1, &input, sizeof(input));
+	
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//SetCursorPos(1336, 27);
+	//mouse_event(MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_LEFTUP, 0, 0, XBUTTON1, GetMessageExtraInfo());
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	
+    cv::namedWindow("Effects", CV_WINDOW_AUTOSIZE);
+	cv::namedWindow("Suwaki", CV_WINDOW_AUTOSIZE);
+
+	createTrackbar("Min Hue", "Suwaki", &min_hue, 255, minhue);
+	createTrackbar("Max Hue", "Suwaki", &max_hue, 255, maxhue);
+	createTrackbar("Min Sat", "Suwaki", &min_sat, 255, minsat);
+	createTrackbar("Max Sat", "Suwaki", &max_sat, 255, maxsat);
+
+	BackgroundSubtractorMOG2 sub;
+	sub.set("nmixtures", 3);
+	sub.set("detectShadows", false);
+	int frames = 500;
+
+	unsigned char size = 2;
+	Mat elem = getStructuringElement(	MORPH_ELLIPSE,
+										Size(2*size+1, 2*size+1),
+										Point(size, size)
+										);
 
     do {
         capture >> frame;
         flip(frame, frame, 1);
-		cvtColor(frame, effects, CV_BGR2HSV); // CV_BGR2HSV
-        split(effects, channels);
-		equalizeHist(channels[2], channels[2]);
-        effects = Mat::zeros(effects.size(), CV_8UC3);
-        merge(channels, 3, effects);
-        cvtColor(effects, effects, CV_HSV2BGR);
+		//cvtColor(frame, effects, CV_BGR2HSV);
+		
+		if(frames > 0)
+		{
+			sub(frame, foreground);
+			frames--;
+		}
+		else
+		{
+			sub(frame, foreground, 0);
+		}
+		sub.getBackgroundImage(effects);
+		erode(foreground, foreground, Mat());
+		dilate(foreground, foreground, Mat());
+		//morphologyEx(foreground, foreground, MORPH_OPEN, elem);
 
-        imshow("CAM", frame);
-        imshow("Effects", s); // effects 
+
+		//effects.convertTo(effects, CV_8UC3);
+
+		//getMask(&effects, &mask);
+		//probab.convertTo(probab, CV_8UC3);
+		imshow("Effects", foreground); // effects
+        imshow("CAM", frame); 
 
         key = waitKey(1);
     } while (key != KEY_ESCAPE);
