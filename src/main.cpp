@@ -2,6 +2,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/video/video.hpp>
+#include <opencv2/objdetect/objdetect.hpp>
 #include <opencv2/ml/ml.hpp>
 #include <iostream>
 #define _USE_MATH_DEFINES
@@ -13,65 +14,11 @@
 using namespace cv;
 using namespace std;
 
-const double EulerConstant = std::exp(1.0);
-const double DPISQRD = std::pow((2*M_PI), 2.0);
-
 #define KEY_ESCAPE 27
 #define KEY_SPACE  32
 
-//int min_hue = 0, max_hue = 255, min_sat = 0, max_sat = 255;
-int min_h = 6, max_h = 38, min_s = 38, max_s = 250, min_v = 51, max_v = 242;
-
-
-void minh(int, void*)
-{
-}
-
-void maxh(int, void*)
-{
-}
-
-void mins(int, void*)
-{
-}
-
-void maxs(int, void*)
-{
-}
-
-void minv(int, void*)
-{
-}
-
-void maxv(int, void*)
-{
-}
-
-void getMask(Mat* frame, Mat* mask)
-{
-	static unsigned int i = 0, j = 0;
-	static const unsigned int rows = frame->rows, cols = frame->cols;
-	static Vec3b pixel;
-
-	for(i = 0; i < rows; i++)
-	{
-		for(j = 0; j < cols; j++)
-		{
-			//printf("i = %d, j = %d\n", i, j);
-			pixel = frame->at<Vec3b>(i, j);
-
-			//if(pixel[0] >= min_hue && pixel[0] <= max_hue && pixel[1] >= min_sat && pixel[1] <= max_sat)
-			if(pixel[0] > min_h && pixel[0] < max_h && pixel[1] > min_s && pixel[1] < max_s && pixel[2] > min_v && pixel[2] < max_v)
-			{
-				mask->at<unsigned char>(i,j) = 255;
-			}
-			else
-			{
-				mask->at<unsigned char>(i,j) = 0;
-			}
-		}
-	}
-}
+#define SCREEN_WIDTH 1366
+#define SCREEN_HEIGHT 768
 
 int main()
 {
@@ -89,120 +36,100 @@ int main()
         cout << "Could not open the camera device, quitting." << endl;
         return -1;
     }
-	capture.set(CV_CAP_PROP_AUTO_EXPOSURE, 0);
+	//capture.set(CV_CAP_PROP_AUTO_EXPOSURE, 0);
+	//capture.set(CV_CAP_PROP_BACKLIGHT, 0);
 	capture.set(CV_CAP_PROP_SETTINGS, 1);
-	capture.set(CV_CAP_PROP_BACKLIGHT, 0);
 
 	printf("OCV version: %d.%d\n", CV_MAJOR_VERSION, CV_MINOR_VERSION);
 
     cv::namedWindow("CAM", CV_WINDOW_AUTOSIZE);
-
-    Mat frame, effects, foreground;
-
-    Mat channels[3], hsv;
-	int rect_width = 150, rect_height = 150, line_thickness = 2;
-	double	rect_x = (capture.get(CV_CAP_PROP_FRAME_WIDTH) - rect_width)/2 - line_thickness,
-			rect_y = (capture.get(CV_CAP_PROP_FRAME_HEIGHT) - rect_height)/2 - line_thickness;
-
-	capture >> frame;	// odczytujemy klatke
-	Mat mask = Mat::zeros(frame.size(), CV_8UC1);	// tworzymy czarny obraz wielkoœci odczytanej klatki
+    cv::namedWindow("Grey", CV_WINDOW_AUTOSIZE);
+    cv::namedWindow("Eq", CV_WINDOW_AUTOSIZE);
+    cv::namedWindow("Haar", CV_WINDOW_AUTOSIZE);
+	Mat frame, copy;
 	
-	vector<Mat> chnls;
-
-	SetCursorPos(500, 500);
 	// http://msdn.microsoft.com/en-us/library/ms646273%28v=vs.85%29.aspx
 	//MOUSEINPUT mi = {1, 1, XBUTTON1, MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_LEFTUP|MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE, 0, GetMessageExtraInfo()};
 	//INPUT input = {INPUT_MOUSE, mi};
 	//SendInput(1, &input, sizeof(input));
 	
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	//SetCursorPos(1336, 27);
-	//mouse_event(MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_LEFTUP, 0, 0, XBUTTON1, GetMessageExtraInfo());
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	
-    cv::namedWindow("Effects", CV_WINDOW_AUTOSIZE);
-	cv::namedWindow("Suwaki", CV_WINDOW_AUTOSIZE);
+	CascadeClassifier fist("fist.xml"), hand("haarcascade.xml");
+	std::vector<cv::Rect> hands_open, fists;
 
-	/*
-	createTrackbar("Min Hue", "Suwaki", &min_hue, 255, minhue);
-	createTrackbar("Max Hue", "Suwaki", &max_hue, 255, maxhue);
-	createTrackbar("Min Sat", "Suwaki", &min_sat, 255, minsat);
-	createTrackbar("Max Sat", "Suwaki", &max_sat, 255, maxsat);
-	*/
-	createTrackbar("Min Hue", "Suwaki", &min_h, 255, minh);
-	createTrackbar("Max Hue", "Suwaki", &max_h, 255, maxh);
-	createTrackbar("Min Saturation", "Suwaki", &min_s, 255, mins);
-	createTrackbar("Max Saturation", "Suwaki", &max_s, 255, maxs);
-	createTrackbar("Min Value", "Suwaki", &min_v, 255, minv);
-	createTrackbar("Max Value", "Suwaki", &max_v, 255, maxv);
-
-	BackgroundSubtractorMOG2 sub;
-	sub.set("nmixtures", 3);
-	sub.set("detectShadows", false);
-	int frames = 0; // 500
-
-	unsigned char size = 1;
-	Mat elem = getStructuringElement(	MORPH_ELLIPSE,
-										Size(2*size+1, 2*size+1),
-										Point(size, size)
-										);
-
-	vector<vector<Point> > kontury;
-	foreground = Mat::zeros(frame.size(), CV_8UC1);
+	double cur_x, cur_y;
 
     do {
         capture >> frame;
         flip(frame, frame, 1);
-		//cvtColor(frame, effects, CV_BGR2HSV);
-		
-			//sub(frame, foreground);
-			/*
-		if(frames > 0)
+        imshow("CAM", frame);
+		cvtColor(frame, copy, COLOR_BGR2GRAY);
+        imshow("Grey", copy);
+		equalizeHist(copy, copy);
+        imshow("Eq", copy);
+		hand.detectMultiScale(copy, hands_open);
+		fist.detectMultiScale(copy, fists);
+
+		if(!hands_open.empty())
+			cur_x = cur_y = 0;
+
+		int max_palm_index = 0;
+
+		for(int i = 0; i < hands_open.size(); i++)
 		{
-			sub(frame, foreground);
-			//frames--;
+			if(hands_open[i].area() > hands_open[max_palm_index].area())
+				max_palm_index = i;
+
+			cur_x += hands_open[i].x + hands_open[i].width/2;
+			cur_y += hands_open[i].y + hands_open[i].height/2;
+		}
+
+		int max_index = 0;
+		if(!fists.empty())
+			cur_x = cur_y = 0;
+
+		for(int i = 0; i < fists.size(); i++)
+		{
+			if(fists[i].area() > fists[max_index].area())
+				max_index = i;
+			cur_x += fists[i].x + fists[i].width/2;
+			cur_y += fists[i].y + fists[i].height/2;
+		}
+
+		if(hands_open.empty())
+		{
+			cur_x = cur_y = -1;
 		}
 		else
 		{
-			sub(frame, foreground, 0);
-		}*/
-		//sub.getBackgroundImage(effects);
-		cvtColor(frame, effects, CV_BGR2HSV);
-		getMask(&effects, &mask);
-		GaussianBlur(mask, mask, Size(5,5), 5, 5);
-		erode(mask, mask, elem);
-		dilate(mask, mask, elem);
-		mask.copyTo(foreground);
-		
+			if(hands_open[max_palm_index].area() > 10000)
+				rectangle(frame, hands_open[max_palm_index], cv::Scalar(255,0,0));
+			cur_x /= hands_open.size();
+			cur_y /= hands_open.size();
 
-		findContours(foreground, kontury, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE); // APPROX_SIMPLE
-		for(vector<vector<Point> >::iterator it = kontury.begin(); it != kontury.end(); ++it)
-		{
-			if(contourArea(*it) >= 5000)
-			{
-				vector<vector<Point> > tcontours;
-				tcontours.push_back(*it);
-				drawContours(frame,tcontours,-1,Scalar(0,0,255),2);
+			cur_x = cur_x * SCREEN_WIDTH / frame.size().width;
+			cur_y = cur_y * SCREEN_HEIGHT / frame.size().height;
 
-				vector<vector<Point> > hulls(1);
-				vector<vector<int> > hullsI(1);
-				convexHull(Mat(tcontours[0]),hulls[0],false);
-				convexHull(Mat(tcontours[0]),hullsI[0],false);
-				drawContours(frame,hulls,-1,Scalar(0,255,0),2);
-			}
+			SetCursorPos(cur_x, cur_y);
 		}
-		//morphologyEx(foreground, foreground, MORPH_OPEN, elem);
 
+		if(!fists.empty())
+		{
+			cur_x /= fists.size();
+			cur_y /= fists.size();
 
-		//effects.convertTo(effects, CV_8UC3);
+			cur_x = cur_x * SCREEN_WIDTH / frame.size().width;
+			cur_y = cur_y * SCREEN_HEIGHT / frame.size().height;
 
-		//getMask(&effects, &mask);
-		//probab.convertTo(probab, CV_8UC3);
-		imshow("Effects", mask); // foreground
-        imshow("CAM", frame); 
+			SetCursorPos(cur_x, cur_y);
+			printf("fist area = %d\n", fists[max_index].area());
+			if(fists[max_index].area() > 5000)
+				rectangle(frame, fists[max_index], cv::Scalar(0, 0, 255));
+
+			mouse_event(MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_LEFTUP, 0, 0, XBUTTON1, GetMessageExtraInfo());
+		}
+        imshow("Haar", frame); 
 
         key = waitKey(1);
-		kontury.clear();
     } while (key != KEY_ESCAPE);
 
     return 0;
