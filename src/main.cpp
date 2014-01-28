@@ -105,7 +105,7 @@ int main()
 			cur_y = cur_y * SCREEN_HEIGHT / frame.size().height;
 
 			SetCursorPos(cur_x, cur_y);
-			printf("fist area = %d\n", fists[max_index].area());
+
 			if(fists[max_index].area() > 5000)
 				rectangle(frame, fists[max_index], cv::Scalar(0, 0, 255));
 
