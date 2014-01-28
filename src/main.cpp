@@ -26,32 +26,19 @@ int main()
 
     VideoCapture capture(0);
 
-	#ifdef WIN32
-		Sleep(1000);
+	#ifndef WIN32
+		Sleep(1000);	// opcjonalne opóŸnienie, brak mo¿e powodowaæ dziwne b³êdy (w tym czasie nastêpuje komunikacja z urz¹dzeniem)
 	#endif
-	//capture.set(CV_CAP_PROP_EXPOSURE, 3.0);
 
 	if(!capture.isOpened())
     {
         cout << "Could not open the camera device, quitting." << endl;
         return -1;
     }
-	//capture.set(CV_CAP_PROP_AUTO_EXPOSURE, 0);
-	//capture.set(CV_CAP_PROP_BACKLIGHT, 0);
-	capture.set(CV_CAP_PROP_SETTINGS, 1);
-
-	printf("OCV version: %d.%d\n", CV_MAJOR_VERSION, CV_MINOR_VERSION);
+	capture.set(CV_CAP_PROP_SETTINGS, 1);	// poka¿ okno z ustawieniami kamery
 
     cv::namedWindow("CAM", CV_WINDOW_AUTOSIZE);
-    cv::namedWindow("Grey", CV_WINDOW_AUTOSIZE);
-    cv::namedWindow("Eq", CV_WINDOW_AUTOSIZE);
-    cv::namedWindow("Haar", CV_WINDOW_AUTOSIZE);
 	Mat frame, copy;
-	
-	// http://msdn.microsoft.com/en-us/library/ms646273%28v=vs.85%29.aspx
-	//MOUSEINPUT mi = {1, 1, XBUTTON1, MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_LEFTUP|MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_MOVE, 0, GetMessageExtraInfo()};
-	//INPUT input = {INPUT_MOUSE, mi};
-	//SendInput(1, &input, sizeof(input));
 	
 	CascadeClassifier fist("fist.xml"), hand("haarcascade.xml");
 	std::vector<cv::Rect> hands_open, fists;
@@ -61,11 +48,8 @@ int main()
     do {
         capture >> frame;
         flip(frame, frame, 1);
-        imshow("CAM", frame);
 		cvtColor(frame, copy, COLOR_BGR2GRAY);
-        imshow("Grey", copy);
 		equalizeHist(copy, copy);
-        imshow("Eq", copy);
 		hand.detectMultiScale(copy, hands_open);
 		fist.detectMultiScale(copy, fists);
 
@@ -127,7 +111,7 @@ int main()
 
 			mouse_event(MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_LEFTUP, 0, 0, XBUTTON1, GetMessageExtraInfo());
 		}
-        imshow("Haar", frame); 
+        imshow("CAM", frame); 
 
         key = waitKey(1);
     } while (key != KEY_ESCAPE);
